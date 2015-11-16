@@ -1,0 +1,416 @@
+// ZIPPY3
+// Use motor controller L298N
+#include <Servo.h>
+Servo servoA;
+const int SERVO_PIN = 11;  // servo control pin = digital PWM
+// servo Control White/Orange/Yellow
+// servo Power  Red
+// servo GND    Black/Brown
+//  L298N Test Code @ hacker.instanet.net CREDIT Tim Laren 
+#define R_MOTOR_PIN1 5    // H-bridge OUT1.1  RIGHT
+#define R_MOTOR_PIN2 6    // H-bridge OUT1.2  RIGHT
+#define R_MOTOR_ENABLE  7    // H-bridge Ena 1  RIGHT
+#define L_MOTOR_PIN1 10   // H-bridge OUT2.1  LEFT
+#define L_MOTOR_PIN2 9    // H-bridge OUT2.2  LEFT
+#define L_MOTOR_ENABLE  8    // H-bridge Ena 2  LEFT
+// Ultrasonic pins by Tim Laren
+// http://hacker.instanet.net/forums/viewtopic.php?f=4&t=9
+//#define gndPin  99           // Untrosonic Ground Pin
+#define DIST_ECHO_PIN 3           // Untrosonic Echo Pin 12
+#define DIST_TRIG_PIN 4           // Untrosonic Trigger Pin 13
+//#define vccPin  99           // Untrosonic +5V Pin
+#define TOUCH_FRONT_LEFT 2   // pin # for front touch sensor 
+#define TOUCH_FRONT_RIGHT 2  // pin # for front touch sensor 
+
+const int SCAN_ANGLES = 5;
+const int STOP_PIN = 2; 
+const int LED_RED = 13;  // Arduino pin # for LED
+const int LED_GRN = 13; 
+
+long runTime = 1000;  // run time in milliseconds
+long stepTime = 500; // time to sleep between steps (any movement)
+long powerNapTime = 10000;  // time to sleep after N steps, conserve power 
+long safeZone = 8;  // min distance from object
+long scanDist[SCAN_ANGLES] = {0, 0, 0, 0, 0};
+const int SPEED = 127;
+const int turnTime90 = 370;
+const int turnTime180 = 720;
+long stepCount = 0;
+long distance=0;
+long minDist=0;
+long loopCount = 0;
+long maxLoopCount = 4;
+
+// Jeremy Blum Debounce 
+boolean lastButton = LOW;    //Variable containing the previous button state
+boolean currentButton = LOW; //Variable containing the current button state
+boolean ledGreenOn = false;       //The present state of the LED_GRN (on/off)
+
+// ###################################################################################
+//  L298N Test Code @ hacker.instanet.net CREDIT Tim Laren timl@instanet.com
+void setupMotorL298N() {
+  // setup motor pins
+  pinMode(R_MOTOR_PIN1, OUTPUT);
+  pinMode(R_MOTOR_PIN2, OUTPUT);
+  pinMode(R_MOTOR_ENABLE, OUTPUT);
+  digitalWrite(R_MOTOR_ENABLE, SPEED);   // set the enables to high
+  pinMode(L_MOTOR_PIN1, OUTPUT);
+  pinMode(L_MOTOR_PIN2, OUTPUT);
+  pinMode(L_MOTOR_ENABLE, OUTPUT);
+  digitalWrite(L_MOTOR_ENABLE, SPEED);   // set the enables to high
+}
+
+// MOTOR driver L298N BASICS
+void fwdMotorLeft(int runTime) {
+  digitalWrite(L_MOTOR_PIN1, LOW);   // LEFT motor: set leg 1 of the H-bridge low
+  digitalWrite(L_MOTOR_PIN2, HIGH);  // LEFT motor: set leg 2 of the H-bridge high
+}
+
+void fwdMotorRight(int runTime) {
+  digitalWrite(R_MOTOR_PIN1, LOW);   // RIGHT motor: set leg 1 of the H-bridge low
+  digitalWrite(R_MOTOR_PIN2, HIGH);  // RIGHT motor: set leg 2 of the H-bridge high
+}
+
+void swerve(int left, int right, int runTime) {
+  digitalWrite(L_MOTOR_PIN1, LOW);    // LEFT motor: set leg 1 of the H-bridge low
+  digitalWrite(L_MOTOR_PIN2, left);   // LEFT motor: set leg 2 of the H-bridge high
+  digitalWrite(R_MOTOR_PIN1, LOW);    // RIGHT motor: set leg 1 of the H-bridge low
+  digitalWrite(R_MOTOR_PIN2, right);  // RIGHT motor: set leg 2 of the H-bridge high
+  delay( runTime );
+  stopMotor();
+}
+
+// ###################################################################################
+void setupDistanceSensor() {
+  // init Ultrasonic distance sensor
+  pinMode(DIST_TRIG_PIN, OUTPUT);
+  pinMode(DIST_ECHO_PIN, INPUT);
+  for( int i=0; i<SCAN_ANGLES; i++ ) {
+    scanDist[i]=0;
+  }
+}
+
+void setupServo() {
+  servoA.attach(SERVO_PIN);
+  servoA.write( 90 );  // forward
+}
+
+// ###################################################################################
+void set0() {
+  // put your setup code here, to run once:
+  // Serial Monitoring Setup
+  Serial.begin(9600);
+  pinMode(5, OUTPUT);
+  pinMode(6, OUTPUT);
+  pinMode(9, OUTPUT);
+}
+
+void setup() {
+  Serial.begin(9600);
+  delay(2000);  // allow time for operator to position device
+  setupServo();
+//  attachInterrupt(0, testRecovery, RISING); // int#0 @ pin#D2
+  
+  // if analog input pin 0 is unconnected, random analog
+  // noise will cause the call to randomSeed() to generate
+  // different seed numbers each time the sketch runs.
+  // randomSeed() will then shuffle the random function.
+  randomSeed(analogRead(0));
+
+  // initialize digital pin as an output.
+  pinMode(LED_RED, OUTPUT);
+  /*Configure the motor A to control the wheel at the left side.*/
+  /*Configure the motor B to control the wheel at the right side.*/
+  /* L298N supplies 5V max; Tamiya motors want 3V; use PWM to limit max voltage. */
+  int speed = 255 * 3 / 5;  // 3 volts
+  // SEEED motordriver.init();
+  // SEEED motordriver.setSpeed(speed,MOTORA);
+  // SEEED motordriver.setSpeed(speed,MOTORB);
+
+  setupMotorL298N();
+  setupDistanceSensor();
+  blinkLED( LED_RED,500);
+}
+// ######## setup above ######## ######## ######## ######## setup above ########
+
+// Tim Laren // http://hacker.instanet.net/forums/viewtopic.php?f=4&t=9
+long sonarDistanceInches() {
+  long duration, inches;
+  digitalWrite(DIST_TRIG_PIN, LOW);
+  delayMicroseconds(4); //2);
+  digitalWrite(DIST_TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(DIST_TRIG_PIN, LOW);
+  duration = pulseIn(DIST_ECHO_PIN, HIGH);
+  inches = microsecondsToInches(duration);
+  printIntStr( inches, "= inches to nearest object" );
+  return inches;
+}
+
+long microsecondsToInches(long microseconds) {
+  return microseconds / 74 / 2;
+}
+long microsecondsToCentimeters(long microseconds) {
+  return microseconds / 29 / 2;
+}
+// Tim Laren // http://hacker.instanet.net/forums/viewtopic.php?f=4&t=9
+
+long getScanDistances() { // long distAngle[]) {
+  long minDist=9999;
+  int i=1;
+  int delta = 45;  // ?? 180 / SCAN_ANGLES;
+  for( i=1; i<=3; i++ ) {
+    servoA.write(i * delta);
+    delay(100);
+    scanDist[i] = sonarDistanceInches();
+    delay(400);
+  }
+  for( i=1; i<=3; i++ ) {
+    if( scanDist[i] < minDist ) { minDist = scanDist[i]; }
+    printIntStr3( i, " angle=", (i * delta), " distAng=", (int) scanDist[i], "." );
+  }
+  return minDist;
+}
+
+void tryBackoutRight(int time) {
+  stopMotor();
+  printIntStr( time, "=backoutRight" );
+  backward( time );
+  turnRight( turnTime180, 0 );
+}
+
+void tryBackoutLeft(int time) {
+  stopMotor();
+  printIntStr( time, "=backoutLeft" );
+  backward( time );
+  turnLeft( turnTime180, 0 );
+}
+
+void testRecovery(int time) {
+  blinkLED( LED_RED, 3000 );
+  forward( runTime );
+  tryBackoutLeft( time );
+  delay( stepTime );
+  forward( runTime );
+  tryBackoutRight( time );
+}
+
+void testSwerve() {
+  blinkLED( LED_RED, 3000 );
+  forward( runTime );
+  turnLeft( turnTime90, 0 );
+  forward( runTime );
+  turnRight( turnTime90, 0 );
+  delay( stepTime );
+}
+/*
+Exploring Arduino - Code Listing 2-5: Debounced Button Toggling
+http://www.exploringarduino.com/content/ch2
+*
+Copyright 2013 Jeremy Blum ( http://www.jeremyblum.com )
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License v3 as published by
+the Free Software Foundation.
+*
+* Debouncing Function 
+* Pass it the previous button state,
+* and get back the current debounced button state.
+*/
+boolean debounce(boolean last, int button)
+{
+  boolean current = digitalRead(button);       //Read the button state
+  if (last != current)                         //if it's differentâ€¦
+  {
+    delay(5);                                  //wait 5ms
+    current = digitalRead(button);             //read it again
+  }
+  return current;                              //return the current value
+}
+
+int testDebounce(int button)
+{
+  currentButton = debounce(lastButton, button);      //read debounced state
+  if (lastButton == LOW && currentButton == HIGH)    //if it was pressed
+  {
+    ledGreenOn = !ledGreenOn;                                  //toggle the LED_GRN value
+  }
+  lastButton = currentButton;                        //reset button value
+  digitalWrite(LED_GRN, ledGreenOn);                          //change the LED_GRN state
+  return currentButton;
+}
+
+int senseTouch() {
+  //  enum int[] = { "front", "rear" };
+  // TODO debounce should replace digitalRead 
+  int touchLeft = testDebounce( TOUCH_FRONT_LEFT );
+  int touchRight = testDebounce( TOUCH_FRONT_RIGHT );
+  if( touchLeft ) {
+    // Serial.println("touchLeft=%d and touchRight=%d", touchLeft, touchRight );
+    Serial.println("touchLeft");
+  }
+  if( touchRight ) {
+      Serial.println("touchRight" );
+  }
+  if ( touchLeft == HIGH ) return ( 1 );
+  if ( touchRight == HIGH ) return( 1 );
+  return ( 0 );
+}
+
+void blinkLED(int pin, int timeOn) {
+  digitalWrite(pin, HIGH);
+  delay(timeOn);
+  digitalWrite(pin, LOW);
+}
+
+void blinkRed(int timeOn) {
+  digitalWrite(LED_RED, HIGH);
+  delay(timeOn);
+  digitalWrite(LED_RED, LOW);
+}
+
+void blinkLEDn(int timeOn, int count) {
+  while( count-- > 0 ) {
+  digitalWrite(LED_RED, HIGH);
+  delay(timeOn);
+  digitalWrite(LED_RED, LOW);
+  }
+}
+
+void stopMotor() {
+  // motordriver.stop();  // SEEED
+  // L298
+  digitalWrite(R_MOTOR_PIN1, LOW);   // set leg 1 of the H-bridge low
+  digitalWrite(R_MOTOR_PIN2, LOW);  // set leg 2 of the H-bridge low
+  digitalWrite(L_MOTOR_PIN1, LOW);  // set leg 1 of the H-bridge low
+  digitalWrite(L_MOTOR_PIN2, LOW);   // set leg 2 of the H-bridge low
+}
+
+void turnLeft( int runTime, int stepTime ) {
+  if( sonarDistanceInches() < safeZone ) { return; }
+  // SEEED motordriver.goLeft();
+  digitalWrite(R_MOTOR_PIN1, LOW);   // set leg 1 of the H-bridge low
+  digitalWrite(R_MOTOR_PIN2, HIGH);  // set leg 2 of the H-bridge high
+  digitalWrite(L_MOTOR_PIN1, HIGH);
+  digitalWrite(L_MOTOR_PIN2, LOW);
+  //  stopAfter( runTime );
+  delay( runTime );
+  stopMotor();
+}
+
+void turnRight( int runTime, int stepTime ) {
+  if( sonarDistanceInches() < safeZone ) { return; }
+  // SEEED motordriver.goRight();
+  digitalWrite(R_MOTOR_PIN1, HIGH);   // set leg 1 of the H-bridge 
+  digitalWrite(R_MOTOR_PIN2, LOW );  // set leg 2 of the H-bridge 
+  digitalWrite(L_MOTOR_PIN1, LOW );
+  digitalWrite(L_MOTOR_PIN2, HIGH);
+  //  stopAfter( runTime );
+  delay( runTime );
+  stopMotor();
+}
+
+void forward(int runTime) {
+  if( sonarDistanceInches() < safeZone ) { return; }
+  Serial.print( "go Forward " );
+  Serial.println(runTime);
+  // SEEED motordriver.goForward();
+  // L298
+  digitalWrite(R_MOTOR_PIN1, LOW);   // set leg 1 of the H-bridge low
+  digitalWrite(R_MOTOR_PIN2, HIGH);  // set leg 2 of the H-bridge high
+  digitalWrite(L_MOTOR_PIN1, LOW);   // set leg 1 of the H-bridge low
+  digitalWrite(L_MOTOR_PIN2, HIGH);  // set leg 2 of the H-bridge high
+  //  stopAfter( runTime );
+  delay( runTime );
+  stopMotor();
+}
+
+void backward(int runTime) {
+  // SEEED motordriver.goBackward();
+  // L298
+  digitalWrite(R_MOTOR_PIN1, HIGH);
+  digitalWrite(R_MOTOR_PIN2, LOW);
+  digitalWrite(L_MOTOR_PIN1, HIGH);
+  digitalWrite(L_MOTOR_PIN2, LOW);
+  //  stopAfter( runTime );
+  delay( runTime );
+  stopMotor();
+}
+
+void stopAfter(long runTime) {    
+  delay( runTime );
+  stopMotor();
+}
+
+void printStringInt( String str, int val ) {
+//  char buffer[132 + 1];  //buffer used to format a line (+1 is for trailing 0)
+  Serial.print(str);
+  Serial.println(val);
+}
+
+void printIntStr( int val, String str ) {
+  Serial.print(val);  Serial.println( " " + str);
+}
+
+void printIntStr2( int a, String strA, int b, String strB ) {
+  Serial.print(a);    Serial.print( " " + strA + "; " );
+  Serial.print(b);    Serial.println( " " + strB);
+}
+
+void printIntStr3( int a, String strA, int b, String strB, int c, String strC ) {
+  Serial.print( a );  Serial.print( " " + strA + "; " );
+  Serial.print( b );  Serial.print( " " + strB + "; " );
+  Serial.print( c );  Serial.println( " " +  strC );
+}
+
+void conservePower( int n ) {
+  return;
+}
+        
+int turnCount=0;
+int alternateTurns() { 
+    if( ++turnCount > 8 ) {turnCount=0;}
+    if( turnCount % 2 == 0 ) {
+      printStringInt( "LEFT turnCount even=", turnCount );
+      turnLeft( turnTime90, 0 );
+    }
+    else {
+      printStringInt( "RIGHT turnCount odd =", turnCount );
+      turnRight( turnTime90, 0 );
+    }
+    return turnCount;
+}
+
+void testServo() {
+  servoA.write( 45 );
+  delay(1000);
+  servoA.write( 90 );
+  delay(1000);
+  servoA.write( 135 );
+  delay(3000);
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  if( ++stepCount >= 32767 ) { stepCount=0; }
+  if( (stepCount % 10) == 0 ) { 
+    printIntStr( stepCount, " taking a power nap" );
+    delay( powerNapTime ); 
+  }
+//  minDist = sonarDistanceInches();
+  minDist = getScanDistances();
+  if ( minDist < safeZone ) {
+    blinkLED( LED_RED, 500 );
+    tryBackoutLeft(400);
+  }
+  else if ( minDist < (safeZone * 2) ) {
+    blinkLED( LED_RED, 250 );
+    turnCount = alternateTurns();
+  }
+  else {
+    printIntStr( minDist, " distance inches" );
+    forward( runTime );
+  }
+  int lightSense = analogRead( 0 );         // read Light Sensor
+//  printIntStr2( lightSense, "=lightSense", stepCount, "=stepCount" ); 
+  delay( 2000 ); // stepTime );
+}
