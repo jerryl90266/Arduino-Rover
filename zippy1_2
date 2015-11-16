@@ -1,0 +1,243 @@
+// ZIPPY1_2
+#define SEEED
+// Use motor controller L298N
+// or
+// SEEED shield  
+#include <MotorDriver.h>
+
+#include <Servo.h>
+Servo servoA;
+const int SERVO1_PIN = 5;  // servo control pin = digital PWM
+// servo Control White/Orange/Yellow
+// servo Power  Red
+// servo GND    Black/Brown
+const int SERVO_FRONT = 90;
+const int SCAN_DELTA = 60;
+const int SCAN_ANGLES = 4;
+
+const int LED_RED = 2;  // Arduino pin # for LED
+int runTime = 1000;  // run time in milliseconds
+int stepTime = 500; // time to sleep between steps (any movement)
+int powerNapTime = 10000;  // time to sleep after N steps, conserve power 
+int safeDist = 10;  // min distance from object
+int led1=12;    // Arduino pin # for LED
+int minSleepTime=500;  // min random sleep time 
+int maxSleepTime=5000;  // max random sleep time
+long randNumber=1.0;
+int turnTime90 = 750;
+int turnTime180 = 1500;
+int stepCount = 0;
+
+// Ultrasonic pins by Tim Laren
+// http://hacker.instanet.net/forums/viewtopic.php?f=4&t=9
+#define gndPin  99           // Untrosonic Ground Pin
+#define SONAR_ECHO_PIN 3           // Untrosonic Echo Pin
+#define SONAR_TRIG_PIN 4           // Untrosonic Trigger Pin
+#define vccPin  99           // Untrosonic +5V Pin
+#define TOUCH_FRONT_LEFT 12   // pin # for front touch sensor
+#define TOUCH_FRONT_RIGHT 13  // pin # for front touch sensor 
+
+// ###################################################################################
+void setupDistanceSensor() {
+  // init Ultrasonic distance sensor
+  pinMode(SONAR_TRIG_PIN, OUTPUT);
+  pinMode(SONAR_ECHO_PIN, INPUT);
+  //  pinMode(gndPin, OUTPUT);
+  //  pinMode(vccPin, OUTPUT);
+  //  digitalWrite(gndPin, LOW);
+  //  digitalWrite(vccPin, HIGH);
+}
+
+void setupServo(int pin) {
+//  servoA.attach(pin);
+//  servoA.write( SERVO_FRONT );  // avoid zero & 180
+}
+void resetServo(int pin) {
+  servoA.write( SERVO_FRONT );
+}
+// ###################################################################################
+
+void setup() {
+  // put your setup code here, to run once:
+  Serial.begin(9600);
+  delay(3000);  // allow time for operator to position device
+  stepCount = 0;
+  // if analog input pin 0 is unconnected, random analog
+  // noise will cause the call to randomSeed() to generate
+  // different seed numbers each time the sketch runs.
+  // randomSeed() will then shuffle the random function.
+  randomSeed(analogRead(0));
+  
+  // initialize digital pin as an output.
+  pinMode(led1, OUTPUT);
+  
+  /*Configure the motor A to control the wheel at the left side.*/
+  /*Configure the motor B to control the wheel at the right side.*/
+  motordriver.init();
+  motordriver.setSpeed(200,MOTORA);
+  motordriver.setSpeed(200,MOTORB);
+//  setupServo(SERVO1_PIN);
+  setupDistanceSensor();
+  blinkLED(1000);
+}
+// ######## setup above ######## ######## setup above ######## ######## setup above ######## 
+
+// Tim Laren // http://hacker.instanet.net/forums/viewtopic.php?f=4&t=9
+int sonarDistanceInches() {
+  long duration, inches;
+//  long distAngle[] = {0, 0, 0, 0, 0};
+
+  digitalWrite(SONAR_TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(SONAR_TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(SONAR_TRIG_PIN, LOW);
+  duration = pulseIn(SONAR_ECHO_PIN, HIGH);
+  inches = microsecondsToInches(duration);
+//  printIntString( inches, " inches to nearest object" );
+  return (int) inches;
+}
+
+long microsecondsToInches(long microseconds) {
+  return microseconds / 74 / 2;
+}
+long microsecondsToCentimeters(long microseconds) {
+  return microseconds / 29 / 2;
+}
+// Tim Laren // http://hacker.instanet.net/forums/viewtopic.php?f=4&t=9
+
+void testServo() {
+  servoA.write( 45 );
+  delay(1000);
+  servoA.write( 90 );
+  delay(1000);
+  servoA.write( 135 );
+  delay(1000);
+  servoA.write( 45 );
+  delay(3000);
+}
+
+int getDistAtAngle( int ang ) {
+    servoA.write( ang );
+    delay(500);
+    int dist = sonarDistanceInches();
+    delay(100);
+    return dist;
+}
+
+void recover(int turnTime) {
+    motordriver.stop();
+    backward( 300 );
+    turnLeft( turnTime, 0 );
+}
+
+int senseTouch() {
+//  enum int[] = { "front", "rear" };
+  int front = 7;  // pin # for front touch sensor 
+  int touchFront = digitalRead( front );
+  if( touchFront == HIGH ) return( 1 );
+  else return( 0 );
+}
+
+void printStringInt( char *str, int val ) {
+  char buffer[132 + 1];  //buffer used to format a line (+1 is for trailing 0)
+  Serial.print(str);
+  Serial.println(val);
+}
+
+void printIntString( int val, char *str ) {
+  Serial.print(val);
+  Serial.println(str);
+}
+
+void printIntStr2( int j, char *str, int k, char *txt ) {
+  Serial.print(j);
+  Serial.print(str);
+  Serial.print(k);
+  Serial.println(txt);
+}
+
+void printIntStr3( int x, char *stx, int y, char *sty, int z, char *stz ) {
+  Serial.print( x );
+  Serial.print( stx );
+  Serial.print( y );
+  Serial.print( sty );
+  Serial.print( z );
+  Serial.println( stz );
+}
+
+void blinkLED(int timeOn) {
+  digitalWrite(led1, HIGH);
+  delay(timeOn);
+  digitalWrite(led1, LOW);
+}
+
+void turnLeft( int runTime, int stepTime ) {
+  Serial.println( "Left turn" );
+  motordriver.goLeft();
+  delay( runTime );
+  motordriver.stop();
+}
+
+void turnRight( int runTime, int stepTime ) {
+  Serial.println( "Right turn" );
+  motordriver.goRight();
+  delay( runTime );
+  motordriver.stop();
+}
+
+void forward(int runTime) {
+  Serial.println( "forward" );
+  motordriver.goForward();
+  delay( runTime );
+  motordriver.stop();
+}
+
+void backward(int runTime) {
+  motordriver.goBackward();
+  delay( runTime );
+  motordriver.stop();
+}
+
+int distFront=0;  int distLeft=0;  int distRight=0;
+void getDistances() {  
+  distFront = getDistAtAngle( SERVO_FRONT );
+  printIntString( distFront, " distance in front" );
+  distLeft = getDistAtAngle( 45 );
+  printIntString( distLeft, " distance to Left" );
+  distRight = getDistAtAngle( 135 );
+  printIntString( distRight, " distance to Right" );
+//  resetServo(SERVO1_PIN);
+  delay(stepTime);
+}
+
+void loop1() {
+  // put your main code here, to run repeatedly:
+  if( ++stepCount >= 32767 ) { stepCount=0; }
+  if( (stepCount % 10) == 0 ) { 
+    printIntString( stepCount, " taking a power nap" );
+    delay( powerNapTime ); 
+  }
+  if( senseTouch() > 0 ) 
+  {  
+    blinkLED( 1000 );
+    recover( turnTime180 );
+  }
+  forward( runTime );
+  delay( stepTime );
+}
+
+void loop() {
+  getDistances();  // set distFront, distLeft, distRight 
+  printIntStr3( distFront, " front / ", distLeft, " left / ", distRight, " right. ---- ----" );
+  if( distFront > safeDist ) 
+    { forward( runTime ); }
+  else if( distLeft > safeDist && distRight < safeDist ) 
+    { turnLeft( turnTime90, 0 ); }
+  else if( distRight > safeDist && distLeft < safeDist ) 
+    { turnRight( turnTime90, 0 ); }
+  else  // U-turn
+    { Serial.println("Safety Bailout");
+      recover( turnTime180 );
+      delay( stepTime*4 ); }
+}
